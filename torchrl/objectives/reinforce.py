@@ -76,11 +76,12 @@ class ReinforceLoss(LossModule):
         *,
         delay_value: bool = False,
         loss_critic_type: str = "smooth_l1",
+        loss_keys=None,
         gamma: float = None,
         advantage_key: str = None,
         value_target_key: str = None,
     ) -> None:
-        super().__init__()
+        super().__init__(loss_keys=loss_keys)
         self._set_deprecated_ctor_keys(
             advantage_key=advantage_key, value_target_key=value_target_key
         )

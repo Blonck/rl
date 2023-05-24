@@ -61,8 +61,9 @@ class DreamerModelLoss(LossModule):
         free_nats: int = 3,
         delayed_clamp: bool = False,
         global_average: bool = False,
+        loss_keys=None,
     ):
-        super().__init__()
+        super().__init__(loss_keys=loss_keys)
         self.world_model = world_model
         self.reco_loss = reco_loss if reco_loss is not None else "l2"
         self.reward_loss = reward_loss if reward_loss is not None else "l2"
@@ -183,8 +184,9 @@ class DreamerActorLoss(LossModule):
         discount_loss: bool = False,  # for consistency with paper
         gamma: int = None,
         lmbda: int = None,
+        loss_keys=None,
     ):
-        super().__init__()
+        super().__init__(loss_keys=loss_keys)
 
         self.actor_model = actor_model
         self.value_model = value_model
@@ -325,8 +327,9 @@ class DreamerValueLoss(LossModule):
         value_loss: Optional[str] = None,
         discount_loss: bool = False,  # for consistency with paper
         gamma: int = 0.99,
+        loss_keys=None,
     ):
-        super().__init__()
+        super().__init__(loss_keys=loss_keys)
         self.value_model = value_model
         self.value_loss = value_loss if value_loss is not None else "l2"
         self.gamma = gamma

@@ -96,12 +96,13 @@ class REDQLoss_deprecated(LossModule):
         target_entropy: Union[str, Number] = "auto",
         delay_qvalue: bool = True,
         gSDE: bool = False,
+        loss_keys=None,
         gamma: float = None,
         priority_key: str = None,
     ):
         if not _has_functorch:
             raise ImportError("Failed to import functorch.") from FUNCTORCH_ERR
-        super().__init__()
+        super().__init__(loss_keys=loss_keys)
         self._set_deprecated_ctor_keys(priority_key=priority_key)
 
         self.convert_to_functional(

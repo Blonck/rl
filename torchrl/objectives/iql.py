@@ -70,11 +70,12 @@ class IQLLoss(LossModule):
         temperature: float = 1.0,
         expectile: float = 0.5,
         gamma: float = None,
+        loss_keys=None,
         priority_key: str = None,
     ) -> None:
         if not _has_functorch:
             raise ImportError("Failed to import functorch.") from FUNCTORCH_ERROR
-        super().__init__()
+        super().__init__(loss_keys=loss_keys)
         self._set_deprecated_ctor_keys(priority_key=priority_key)
 
         # IQL parameter

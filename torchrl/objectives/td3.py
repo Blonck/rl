@@ -72,6 +72,7 @@ class TD3Loss(LossModule):
         loss_function: str = "smooth_l1",
         delay_actor: bool = True,
         delay_qvalue: bool = True,
+        loss_keys=None,
         gamma: float = None,
         priority_key: str = None,
     ) -> None:
@@ -80,7 +81,7 @@ class TD3Loss(LossModule):
                 f"Failed to import functorch with error message:\n{FUNCTORCH_ERR}"
             )
 
-        super().__init__()
+        super().__init__(loss_keys=loss_keys)
         self._set_deprecated_ctor_keys(priority_key=priority_key)
 
         self.delay_actor = delay_actor
@@ -104,9 +105,7 @@ class TD3Loss(LossModule):
         self.loss_function = loss_function
         self.policy_noise = policy_noise
         self.noise_clip = noise_clip
-        self.max_action = (
-            actor_network.spec[self.loss_key("action_key")].space.maximum.max().item()
-        )
+        self.max_action = actor_network.spec["action"].space.maximum.max().item()
         if gamma is not None:
             warnings.warn(_GAMMA_LMBDA_DEPREC_WARNING, category=DeprecationWarning)
             self.gamma = gamma

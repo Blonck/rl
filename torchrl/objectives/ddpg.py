@@ -50,8 +50,9 @@ class DDPGLoss(LossModule):
         delay_actor: bool = False,
         delay_value: bool = True,
         gamma: float = None,
+        loss_keys=None,
     ) -> None:
-        super().__init__()
+        super().__init__(loss_keys=loss_keys)
 
         self.delay_actor = delay_actor
         self.delay_value = delay_value

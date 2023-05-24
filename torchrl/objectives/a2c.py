@@ -81,10 +81,11 @@ class A2CLoss(LossModule):
         loss_critic_type: str = "smooth_l1",
         gamma: float = None,
         separate_losses: bool = False,
+        loss_keys=None,
         advantage_key: str = None,
         value_target_key: str = None,
     ):
-        super().__init__()
+        super().__init__(loss_keys=loss_keys)
 
         self._set_deprecated_ctor_keys(
             advantage_key=advantage_key, value_target_key=value_target_key

@@ -97,12 +97,13 @@ class REDQLoss(LossModule):
         delay_qvalue: bool = True,
         gSDE: bool = False,
         gamma: float = None,
+        loss_keys=None,
         priority_key: str = None,
     ):
         if not _has_functorch:
             raise ImportError("Failed to import functorch.") from FUNCTORCH_ERR
 
-        super().__init__()
+        super().__init__(loss_keys=loss_keys)
         self._set_deprecated_ctor_keys(priority_key=priority_key)
 
         self.convert_to_functional(
@@ -157,9 +158,7 @@ class REDQLoss(LossModule):
                     "the target entropy explicitely or provide the spec of the "
                     "action tensor in the actor network."
                 )
-            target_entropy = -float(
-                np.prod(actor_network.spec[self.loss_key("action_key")].shape)
-            )
+            target_entropy = -float(np.prod(actor_network.spec["action"].shape))
         self.register_buffer(
             "target_entropy", torch.tensor(target_entropy, device=device)
         )

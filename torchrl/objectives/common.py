@@ -68,19 +68,28 @@ class LossModule(nn.Module, ABC):
         cls.forward = set_exploration_type(ExplorationType.MODE)(cls.forward)
         return super().__new__(cls)
 
-    def __init__(self):
+    def __init__(self, loss_keys=None):
         super().__init__()
+
+        default_keys = self.default_loss_keys()
+
+        if loss_keys is not None:
+            for key, value in loss_keys.items():
+                if key not in default_keys:
+                    raise ValueError("Unknown loss key provided")
+                default_keys[key] = value
+        self._loss_keys = default_keys
+
         self._param_maps = {}
         self._value_estimator = None
         self._has_update_associated = False
-        self._loss_keys = self.default_loss_keys()
         self.value_type = self.default_value_estimator
         # self.register_forward_pre_hook(_parameters_to_tensordict)
 
     @staticmethod
     @abstractmethod
     def default_loss_keys(self) -> dict[str, NestedKey]:
-        """Defines the default tensordict keys."""
+        """Defines the default loss tensordict keys."""
         ...
 
     def _set_deprecated_ctor_keys(self, **kwargs) -> None:
@@ -88,29 +97,32 @@ class LossModule(nn.Module, ABC):
         for key, value in kwargs.items():
             if value is not None:
                 warnings.warn(
-                    f"Setting '{key}' via ctor is deprecated, use .set_keys({key}='some_key') instead.",
+                    f"Setting '{key}' via ctor is deprecated, use LossModule(..., loss_keys=dict(...)) instead.",
                     category=DeprecationWarning,
                 )
-            self.set_keys(**{key: value})
+                self._loss_keys[key] = value
+            else:
+                # ignore None values
+                pass
 
     def loss_key(self, name: str) -> NestedKey:
         return self._loss_keys[name]
 
-    def set_keys(self, **kwargs) -> None:
-        """Specify tensordict key for given argument.
+    # def set_keys(self, **kwargs) -> None:
+    #    """Specify tensordict key for given argument.
 
-        Examples:
-            >>> from torchrl.objectives import DQNLoss
-            >>> # initialize the DQN loss
-            >>> actor = torch.nn.Linear(3, 4)
-            >>> dqn_loss = DQNLoss(actor, action_space="one-hot")
-            >>> dqn_loss.set_keys(priority_key="td_error", action_value_key="action_value")
-        """
-        for key, value in kwargs.items():
-            if key not in self.default_loss_keys().keys():
-                raise ValueError(f"{key} not a valid tensordict key")
-            set_value = value if value is not None else self.default_loss_keys()[key]
-            self._loss_keys[key] = set_value
+    #    Examples:
+    #        >>> from torchrl.objectives import DQNLoss
+    #        >>> # initialize the DQN loss
+    #        >>> actor = torch.nn.Linear(3, 4)
+    #        >>> dqn_loss = DQNLoss(actor, action_space="one-hot")
+    #        >>> dqn_loss.set_keys(priority_key="td_error", action_value_key="action_value")
+    #    """
+    #    for key, value in kwargs.items():
+    #        if key not in self.default_loss_keys().keys():
+    #            raise ValueError(f"{key} not a valid tensordict key")
+    #        set_value = value if value is not None else self.default_loss_keys()[key]
+    #        self._loss_keys[key] = set_value
 
     def forward(self, tensordict: TensorDictBase) -> TensorDictBase:
         """It is designed to read an input TensorDict and return another tensordict with loss keys named "loss*".

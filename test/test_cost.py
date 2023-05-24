@@ -524,7 +524,7 @@ class TestLossModuleBase:
             world_model(td)
         return world_model
 
-    def _construct_loss(self, loss_module, **kwargs):
+    def _construct_loss(self, loss_module, loss_keys, **kwargs):
         print(f"{loss_module = }")
         if loss_module in [
             PPOLoss,
@@ -537,33 +537,41 @@ class TestLossModuleBase:
         ]:
             actor = self._create_mock_actor()
             value = self._create_mock_value()
-            return loss_module(actor, value, **kwargs)
+            return loss_module(actor, value, loss_keys=loss_keys, **kwargs)
         elif loss_module in [DQNLoss]:
             actor = self._create_mock_qv_actor()
-            return loss_module(actor, **kwargs)
+            return loss_module(actor, loss_keys=loss_keys, **kwargs)
         elif loss_module in [DistributionalDQNLoss]:
             actor = self._create_mock_qv_actor()
-            return loss_module(actor, gamma=0.9, **kwargs)
+            return loss_module(actor, gamma=0.9, loss_keys=loss_keys, **kwargs)
         elif loss_module in [SACLoss, IQLLoss]:
             actor = self._create_mock_actor()
             qvalue = self._create_mock_qvalue()
             value = self._create_mock_value()
-            return loss_module(actor, qvalue, value, **kwargs)
+            return loss_module(actor, qvalue, value, loss_keys=loss_keys, **kwargs)
         elif loss_module in [DiscreteSACLoss]:
             actor = self._create_mock_actor(action_spec_type="one_hot")
             qvalue = self._create_mock_qvalue()
-            return loss_module(actor, qvalue, actor.spec["action"].space.n, **kwargs)
+            return loss_module(
+                actor,
+                qvalue,
+                actor.spec["action"].space.n,
+                loss_keys=loss_keys,
+                **kwargs,
+            )
         elif loss_module in [DreamerModelLoss]:
             world_model = self._create_world_model_model(10, 5)
-            return DreamerModelLoss(world_model)
+            return DreamerModelLoss(world_model, loss_keys=loss_keys)
         elif loss_module in [DreamerActorLoss]:
             mb_env = self._create_mb_env(10, 5)
             actor_model = self._create_actor_model(10, 5)
             value_model = self._create_value_model(10, 5)
-            return DreamerActorLoss(actor_model, value_model, mb_env)
+            return DreamerActorLoss(
+                actor_model, value_model, mb_env, loss_keys=loss_keys
+            )
         elif loss_module in [DreamerValueLoss]:
             value_model = self._create_value_model(10, 5)
-            return DreamerValueLoss(value_model)
+            return DreamerValueLoss(value_model, loss_keys=loss_keys)
         elif loss_module in [ReinforceLoss]:
             n_obs = 3
             n_act = 5
@@ -580,6 +588,7 @@ class TestLossModuleBase:
             return ReinforceLoss(
                 actor_net,
                 critic=value_net,
+                loss_keys=loss_keys,
                 **kwargs,
             )
         else:
@@ -588,17 +597,15 @@ class TestLossModuleBase:
     @pytest.mark.parametrize("loss_module", LOSS_MODULES)
     def test_tensordict_keys_unknown_key(self, loss_module):
         """Test that exception is raised if an unknown key is set via .set_keys()"""
-        loss_fn = self._construct_loss(loss_module)
-
         with pytest.raises(ValueError):
-            loss_fn.set_keys(unknown_key="test2")
+            loss_fn = self._construct_loss(loss_module, loss_keys={"unknown": "test2"})
 
     @pytest.mark.parametrize("loss_module", LOSS_MODULES)
     def test_tensordict_keys_default_values(self, loss_module):
         default_keys = self.DEFAULT_KEYS[loss_module]
-        loss_fn = self._construct_loss(loss_module)
 
         for key, value in default_keys.items():
+            loss_fn = self._construct_loss(loss_module, loss_keys={key: value})
             assert loss_fn.loss_key(key) == value
 
     @pytest.mark.parametrize("loss_module", LOSS_MODULES)
@@ -606,16 +613,14 @@ class TestLossModuleBase:
         """Test setting of tensordict keys via .set_keys()"""
         default_keys = self.DEFAULT_KEYS[loss_module]
 
-        loss_fn = self._construct_loss(loss_module)
-
         new_key = "test1"
         for key, _ in default_keys.items():
-            loss_fn.set_keys(**{key: new_key})
+            loss_fn = self._construct_loss(loss_module, loss_keys={key: new_key})
             assert loss_fn.loss_key(key) == new_key
 
-        loss_fn = self._construct_loss(loss_module)
-        loss_fn.set_keys(**{key: new_key for key, _ in default_keys.items()})
-
+        loss_fn = self._construct_loss(
+            loss_module, loss_keys={key: new_key for key, _ in default_keys.items()}
+        )
         for key, _ in default_keys.items():
             assert loss_fn.loss_key(key) == new_key
 
@@ -632,7 +637,9 @@ class TestLossModuleBase:
         for key in dep_keys:
             new_key = "test3"
             with pytest.deprecated_call():
-                loss_fn = self._construct_loss(loss_module, **{key: new_key})
+                loss_fn = self._construct_loss(
+                    loss_module, **{key: new_key}, loss_keys=None
+                )
                 assert loss_fn.loss_key(key) == new_key
 
                 for def_key, def_value in default_keys.items():
@@ -644,7 +651,7 @@ class TestLossModuleBase:
         """Check that DEFAULT_KEYS contains all available tensordict keys from each loss module."""
         tested_keys = set(self.DEFAULT_KEYS[loss_module].keys())
 
-        loss_fn = self._construct_loss(loss_module)
+        loss_fn = self._construct_loss(loss_module, loss_keys=None)
         avail_keys = set(loss_fn.default_loss_keys().keys())
         assert avail_keys.difference(tested_keys) == set()
 
@@ -3181,13 +3188,17 @@ class TestPPO:
             value_key=value_key,
         )
 
-        loss_fn = loss_class(actor, value, loss_critic_type="l2")
-        loss_fn.set_keys(
-            advantage_key=advantage_key,
-            value_target_key=value_target_key,
-            value_key=value_key,
-            sample_log_prob_key=sample_log_prob_key,
-            action_key=action_key,
+        loss_fn = loss_class(
+            actor,
+            value,
+            loss_critic_type="l2",
+            loss_keys={
+                "advantage_key": advantage_key,
+                "value_target_key": value_target_key,
+                "value_key": value_key,
+                "sample_log_prob_key": sample_log_prob_key,
+                "action_key": action_key,
+            },
         )
         advantage(td)
 
@@ -3460,12 +3471,16 @@ class TestA2C:
             value_target_key=value_target_key,
             value_key=value_key,
         )
-        loss_fn = A2CLoss(actor, value, loss_critic_type="l2")
-        loss_fn.set_keys(
-            advantage_key=advantage_key,
-            value_target_key=value_target_key,
-            value_key=value_key,
-            action_key=action_key,
+        loss_fn = A2CLoss(
+            actor,
+            value,
+            loss_critic_type="l2",
+            loss_keys={
+                "advantage_key": advantage_key,
+                "value_target_key": value_target_key,
+                "value_key": value_key,
+                "action_key": action_key,
+            },
         )
 
         advantage(td)

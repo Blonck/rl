@@ -65,10 +65,10 @@ class DQNLoss(LossModule):
         delay_value: bool = False,
         gamma: float = None,
         action_space: Union[str, TensorSpec] = None,
+        loss_keys=None,
         priority_key: str = None,
     ) -> None:
-
-        super().__init__()
+        super().__init__(loss_keys=loss_keys)
 
         self._set_deprecated_ctor_keys(priority_key=priority_key)
 
@@ -260,9 +260,10 @@ class DistributionalDQNLoss(LossModule):
         value_network: Union[DistributionalQValueActor, nn.Module],
         gamma: float,
         delay_value: bool = False,
+        loss_keys=None,
         priority_key: str = None,
     ):
-        super().__init__()
+        super().__init__(loss_keys=loss_keys)
         self._set_deprecated_ctor_keys(priority_key=priority_key)
 
         self.register_buffer("gamma", torch.tensor(gamma))

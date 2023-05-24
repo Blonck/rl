@@ -106,12 +106,13 @@ class SACLoss(LossModule):
         delay_actor: bool = False,
         delay_qvalue: bool = True,
         delay_value: bool = True,
+        loss_keys=None,
         gamma: float = None,
         priority_key: str = None,
     ) -> None:
         if not _has_functorch:
             raise ImportError("Failed to import functorch.") from FUNCTORCH_ERROR
-        super().__init__()
+        super().__init__(loss_keys=loss_keys)
         self._set_deprecated_ctor_keys(priority_key=priority_key)
 
         # Actor
@@ -539,11 +540,13 @@ class DiscreteSACLoss(LossModule):
         target_entropy_weight: float = 0.98,
         target_entropy: Union[str, Number] = "auto",
         delay_qvalue: bool = True,
+        loss_keys=None,
         priority_key: str = None,
     ):
         if not _has_functorch:
             raise ImportError("Failed to import functorch.") from FUNCTORCH_ERROR
-        super().__init__()
+
+        super().__init__(loss_keys=loss_keys)
         self._set_deprecated_ctor_keys(priority_key=priority_key)
 
         self.convert_to_functional(

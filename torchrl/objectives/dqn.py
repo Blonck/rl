@@ -125,14 +125,22 @@ class DQNLoss(LossModule):
                 Defaults to ``"action"``.
             priority (NestedKey): The input tensordict key where the target priority is written to.
                 Defaults to ``"td_error"``.
+            reward (NestedKey): The input tensordict key where the reward is expected.
+                Will be used for the underlying value estimator. Defaults to ``"reward"``.
+            done (NestedKey): The key in the input TensorDict that indicates
+                whether a trajectory is done. Will be used for the underlying value estimator.
+                Defaults to ``"done"``.
         """
 
         action_value: NestedKey = "action_value"
         action: NestedKey = "action"
         priority: NestedKey = "td_error"
+        reward: NestedKey = "reward"
+        done: NestedKey = "done"
 
     default_keys = _AcceptedKeys()
     default_value_estimator = ValueEstimators.TD0
+    out_keys = ["loss"]
 
     def __init__(
         self,
@@ -146,6 +154,7 @@ class DQNLoss(LossModule):
     ) -> None:
 
         super().__init__()
+        self._in_keys = None
         self._set_deprecated_ctor_keys(priority=priority_key)
         self.delay_value = delay_value
         value_network = ensure_tensordict_compatible(
@@ -187,7 +196,32 @@ class DQNLoss(LossModule):
             self.gamma = gamma
 
     def _forward_value_estimator_keys(self, **kwargs) -> None:
-        pass
+        if self._value_estimator is not None:
+            self._value_estimator.set_keys(
+                reward=self.tensor_keys.reward,
+                done=self.tensor_keys.done,
+            )
+        self._set_in_keys()
+
+    def _set_in_keys(self):
+        keys = [
+            self.tensor_keys.action,
+            ("next", self.tensor_keys.reward),
+            ("next", self.tensor_keys.done),
+            *self.value_network.in_keys,
+            *[("next", key) for key in self.value_network.in_keys],
+        ]
+        self._in_keys = list(set(keys))
+
+    @property
+    def in_keys(self):
+        if self._in_keys is None:
+            self._set_in_keys()
+        return self._in_keys
+
+    @in_keys.setter
+    def in_keys(self, values):
+        self._in_keys = values
 
     def make_value_estimator(self, value_type: ValueEstimators = None, **hyperparams):
         if value_type is None:
@@ -216,19 +250,12 @@ class DQNLoss(LossModule):
             "advantage": "advantage",
             "value_target": "value_target",
             "value": "chosen_action_value",
+            "reward": self.tensor_keys.reward,
+            "done": self.tensor_keys.done,
         }
         self._value_estimator.set_keys(**tensor_keys)
 
-    @dispatch(
-        source=[
-            "observation",
-            ("next", "observation"),
-            "action",
-            ("next", "reward"),
-            ("next", "done"),
-        ],
-        dest=["loss"],
-    )
+    @dispatch
     def forward(self, tensordict: TensorDictBase) -> TensorDict:
         """Computes the DQN loss given a tensordict sampled from the replay buffer.
 

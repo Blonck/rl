@@ -39,7 +39,7 @@ from mocking_classes import (
 )
 from packaging import version
 from tensordict.nn import TensorDictModuleBase
-from tensordict.tensordict import assert_allclose_td, TensorDict
+from tensordict.tensordict import assert_allclose_td, TensorDict, TensorDictBase
 from torch import nn
 
 from torchrl.collectors import MultiSyncDataCollector, SyncDataCollector
@@ -1015,6 +1015,7 @@ def test_seed():
 @pytest.mark.parametrize("exclude_action", [True, False])
 @pytest.mark.parametrize("has_out", [True, False])
 @pytest.mark.parametrize("lazy_stack", [False, True])
+@pytest.mark.filterwarnings("ignore:Using exclude_.*:DeprecationWarning")
 def test_steptensordict(
     keep_other, exclude_reward, exclude_done, exclude_action, has_out, lazy_stack
 ):
@@ -1092,6 +1093,145 @@ def test_steptensordict(
         assert "done" not in out.keys()
     if has_out:
         assert out is next_tensordict
+
+
+def step_mdp_old(
+    tensordict: TensorDictBase,
+    next_tensordict: TensorDictBase = None,
+    keep_other: bool = True,
+    exclude_reward: bool = True,
+    exclude_done: bool = False,
+    exclude_action: bool = True,
+) -> TensorDictBase:
+    """Previous step_mdp implementation. Used to check if the current one does not break BC.
+
+    Can be deleted as soon as deprecated arguments are removed.
+    """
+    out = tensordict.get("next").clone(False)
+    excluded = None
+    if exclude_done and exclude_reward:
+        excluded = {"done", "reward"}
+    elif exclude_reward:
+        excluded = {"reward"}
+    elif exclude_done:
+        excluded = {"done"}
+    if excluded:
+        out = out.exclude(*excluded, inplace=True)
+    td_keys = None
+    if keep_other:
+        out_keys = set(out.keys())
+        td_keys = set(tensordict.keys()) - out_keys - {"next"}
+        if exclude_action:
+            td_keys = td_keys - {"action"}
+    elif not exclude_action:
+        td_keys = {"action"}
+
+    if td_keys:
+        # update does some checks that we can spare
+        # out.update(tensordict.select(*td_keys))
+        for key in td_keys:
+            out._set(key, tensordict.get(key))
+    if next_tensordict is not None:
+        return next_tensordict.update(out)
+    else:
+        return out
+
+
+@pytest.mark.parametrize("keep_other", [True, False])
+@pytest.mark.parametrize("exclude_reward", [True, False])
+@pytest.mark.parametrize("exclude_action", [True, False])
+@pytest.mark.parametrize("exclude_done", [True, False])
+@pytest.mark.filterwarnings("ignore:Using exclude_.*:DeprecationWarning")
+def test_step_mdp_equal_old_behavior(
+    keep_other, exclude_reward, exclude_action, exclude_done
+):
+    torch.manual_seed(0)
+    batch = [
+        4,
+    ]
+    tensordict = TensorDict(
+        {
+            "ledzep": torch.randn(*batch, 2),
+            "next": {
+                "observation": torch.randn(*batch, 2),
+                "ledzep": torch.randn(*batch, 2),
+                "reward": torch.randn(*batch, 1),
+                "done": torch.randn(*batch, 1),
+            },
+            "beatles": torch.randn(*batch, 1),
+            "action": torch.randn(*batch, 2),
+        },
+        [4],
+    )
+
+    ntensordict = step_mdp_old(
+        tensordict,
+        keep_other=keep_other,
+        exclude_reward=exclude_reward,
+        exclude_action=exclude_action,
+        exclude_done=exclude_done,
+    )
+    # default for which keys are excluded
+    exclude_from_next = {"reward", "action"}
+    exclude_from_other = set()
+    if keep_other and exclude_action:
+        exclude_from_other = exclude_from_other.union({"action"})
+    elif not keep_other and not exclude_action:
+        exclude_from_other = exclude_from_other.union({"action"})
+
+    if not exclude_action:
+        exclude_from_next = exclude_from_next - {"action"}
+    if not exclude_reward:
+        exclude_from_next = exclude_from_next - {"reward"}
+    if exclude_done:
+        exclude_from_next = exclude_from_next.union({"done"})
+
+    ntensordict2 = step_mdp(
+        tensordict,
+        keep_other=keep_other,
+        exclude_from_next=exclude_from_next,
+        exclude_from_other=exclude_from_other,
+    )
+    assert set(ntensordict.keys()) == set(ntensordict2.keys())
+
+    ntensordict3 = step_mdp(
+        tensordict,
+        keep_other=keep_other,
+        exclude_reward=exclude_reward,
+        exclude_action=exclude_action,
+        exclude_done=exclude_done,
+    )
+    assert set(ntensordict.keys()) == set(ntensordict3.keys())
+
+    for key in ntensordict.keys():
+        assert (ntensordict[key] == ntensordict2[key]).all()
+
+    if keep_other:
+        assert "beatles" in ntensordict.keys()
+        assert "beatles" in ntensordict2.keys()
+    else:
+        assert "beatles" not in ntensordict.keys()
+        assert "beatles" not in ntensordict2.keys()
+
+    # check for excluded keys
+    for key in exclude_from_next:
+        assert key not in ntensordict.keys()
+        assert key not in ntensordict2.keys()
+    for key in {"reward", "action", "done", "observation"} - exclude_from_next:
+        assert key in ntensordict.keys()
+        assert key in ntensordict2.keys()
+
+    # check are "next" entries have made a step
+    if not exclude_done:
+        assert (tensordict[("next", "done")] == ntensordict["done"]).all()
+        assert (tensordict[("next", "done")] == ntensordict2["done"]).all()
+    if not exclude_reward:
+        assert (tensordict[("next", "reward")] == ntensordict["reward"]).all()
+        assert (tensordict[("next", "reward")] == ntensordict2["reward"]).all()
+    assert (tensordict[("next", "ledzep")] == ntensordict["ledzep"]).all()
+    assert (tensordict[("next", "ledzep")] == ntensordict2["ledzep"]).all()
+    assert (tensordict[("next", "observation")] == ntensordict["observation"]).all()
+    assert (tensordict[("next", "observation")] == ntensordict2["observation"]).all()
 
 
 @pytest.mark.parametrize("device", get_default_devices())

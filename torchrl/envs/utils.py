@@ -4,6 +4,8 @@
 # LICENSE file in the root directory of this source tree.
 from __future__ import annotations
 
+import warnings
+
 import pkg_resources
 import torch
 from tensordict.nn.probabilistic import (  # noqa
@@ -46,32 +48,46 @@ def step_mdp(
     tensordict: TensorDictBase,
     next_tensordict: TensorDictBase = None,
     keep_other: bool = True,
-    exclude_reward: bool = True,
-    exclude_done: bool = False,
-    exclude_action: bool = True,
+    exclude_reward: bool = None,
+    exclude_done: bool = None,
+    exclude_action: bool = None,
+    exclude_from_next=frozenset(["reward", "action"]),
+    exclude_from_other=frozenset(),
 ) -> TensorDictBase:
     """Creates a new tensordict that reflects a step in time of the input tensordict.
 
     Given a tensordict retrieved after a step, returns the :obj:`"next"` indexed-tensordict.
-    THe arguments allow for a precise control over what should be kept and what
+    The arguments allow for a precise control over what should be kept and what
     should be copied from the ``"next"`` entry. The default behaviour is:
-    move the observation entries, reward and done states to the root, exclude
-    the current action and keep all extra keys (non-action, non-done, non-reward).
+    move the all entries from :obj:`"next"` except ``"action"`` and ``"reward"`` to the root.
+    By default all extra keys (non-action, non-done, non-reward) which cannot be found in :obj:`"next"`
+    will be kept.
 
     Args:
         tensordict (TensorDictBase): tensordict with keys to be renamed
         next_tensordict (TensorDictBase, optional): destination tensordict
         keep_other (bool, optional): if ``True``, all keys that do not start with :obj:`'next_'` will be kept.
             Default is ``True``.
-        exclude_reward (bool, optional): if ``True``, the :obj:`"reward"` key will be discarded
+        exclude_from_next (set): All tensordict keys in :obj:`exclude_keys` are
+            discared when from :obj:`'next_'` when the entries from :obj:`"next"`
+            are copied. Default is ``{"reward", "action"}``.
+        exclude_from_other (set): Defines exception from ``keep_other``
+            argument. If keep_other is ``True``, all keys in ``exclude_from_other``
+            are dropped from the root tensordict. If ``keep_other`` is ``False``,
+            all keys in ``exclude_from_other`` are kept in the root tensordict.
+            Defaults is ``frozenset()``
+        exclude_reward (bool, optional): [deprecated, use :obj:`exclude_keys` argument instead]
+            if ``True``, the :obj:`"reward"` key will be discarded
             from the resulting tensordict. If ``False``, it will be copied (and replaced)
             from the ``"next"`` entry (if present).
             Default is ``True``.
-        exclude_done (bool, optional): if ``True``, the :obj:`"done"` key will be discarded
+        exclude_done (bool, optional): [deprecated, use :obj:`exclude_keys` argument instead]
+            if ``True``, the :obj:`"done"` key will be discarded
             from the resulting tensordict. If ``False``, it will be copied (and replaced)
             from the ``"next"`` entry (if present).
             Default is ``False``.
-        exclude_action (bool, optional): if ``True``, the :obj:`"action"` key will
+        exclude_action (bool, optional): [deprecated, use :obj:`exclude_keys` argument instead]
+            if ``True``, the :obj:`"action"` key will
             be discarded from the resulting tensordict. If ``False``, it will
             be kept in the root tensordict (since it should not be present in
             the ``"next"`` entry).
@@ -143,41 +159,60 @@ def step_mdp(
             batch_size=torch.Size([]),
             device=None,
             is_shared=False)
-
     """
-    if isinstance(tensordict, LazyStackedTensorDict):
-        if next_tensordict is not None:
-            next_tensordicts = next_tensordict.unbind(tensordict.stack_dim)
-        else:
-            next_tensordicts = [None] * len(tensordict.tensordicts)
-        out = torch.stack(
-            [
-                step_mdp(
-                    td,
-                    next_tensordict=ntd,
-                    keep_other=keep_other,
-                    exclude_reward=exclude_reward,
-                    exclude_done=exclude_done,
-                    exclude_action=exclude_action,
-                )
-                for td, ntd in zip(tensordict.tensordicts, next_tensordicts)
-            ],
-            tensordict.stack_dim,
+    eother_keys = exclude_from_other
+    enext_keys = exclude_from_next
+    if exclude_action is not None:
+        warnings.warn(
+            "Using exclude_action is deprecated, configure excluded_keys by `exclude_from_next` parameter instead.",
+            category=DeprecationWarning,
         )
-        if next_tensordict is not None:
-            next_tensordict.update(out)
-            return next_tensordict
-        return out
+        if not exclude_action:
+            enext_keys = enext_keys - {"action"}
+        if keep_other and exclude_action:
+            eother_keys = eother_keys.union({"action"})
+        elif not keep_other and not exclude_action:
+            eother_keys = eother_keys.union({"action"})
+    if exclude_reward is not None and not exclude_reward:
+        warnings.warn(
+            "Using exclude_reward is deprecated, configure excluded_keys by `exclude_from_next` parameter instead.",
+            category=DeprecationWarning,
+        )
+        enext_keys = enext_keys - {"reward"}
+    if exclude_done is not None and exclude_done:
+        warnings.warn(
+            "Using exclude_done is deprecated, configure excluded_keys by `exclude_from_next` parameter instead.",
+            category=DeprecationWarning,
+        )
+        enext_keys = enext_keys.union({"done"})
+
+    if isinstance(tensordict, LazyStackedTensorDict):
+        return _step_mdp_impl_lazystacked(
+            tensordict=tensordict,
+            next_tensordict=next_tensordict,
+            keep_other=keep_other,
+            exclude_from_next=enext_keys,
+            exclude_from_other=eother_keys,
+        )
+    else:
+        return _step_mdp_impl_tensordict(
+            tensordict=tensordict,
+            next_tensordict=next_tensordict,
+            keep_other=keep_other,
+            exclude_from_next=enext_keys,
+            exclude_from_other=eother_keys,
+        )
+
+
+def _step_mdp_impl_tensordict(
+    tensordict: TensorDictBase,
+    next_tensordict: TensorDictBase,
+    keep_other,
+    exclude_from_next,
+    exclude_from_other,
+):
     out = tensordict.get("next").clone(False)
-    excluded = None
-    if exclude_done and exclude_reward:
-        excluded = {"done", "reward"}
-    elif exclude_reward:
-        excluded = {"reward"}
-    elif exclude_done:
-        excluded = {"done"}
-    if excluded:
-        out = out.exclude(*excluded, inplace=True)
+    out = out.exclude(*exclude_from_next, inplace=True)
     # TODO: make it work with LazyStackedTensorDict
     # def _valid_key(key):
     #     if key == "next" or key in out.keys():
@@ -191,10 +226,9 @@ def step_mdp(
     if keep_other:
         out_keys = set(out.keys())
         td_keys = set(tensordict.keys()) - out_keys - {"next"}
-        if exclude_action:
-            td_keys = td_keys - {"action"}
-    elif not exclude_action:
-        td_keys = {"action"}
+        td_keys = td_keys - exclude_from_other
+    else:
+        td_keys = exclude_from_other
 
     if td_keys:
         # update does some checks that we can spare
@@ -205,6 +239,36 @@ def step_mdp(
         return next_tensordict.update(out)
     else:
         return out
+
+
+def _step_mdp_impl_lazystacked(
+    tensordict: TensorDictBase,
+    next_tensordict,
+    keep_other,
+    exclude_from_next,
+    exclude_from_other,
+):
+    if next_tensordict is not None:
+        next_tensordicts = next_tensordict.unbind(tensordict.stack_dim)
+    else:
+        next_tensordicts = [None] * len(tensordict.tensordicts)
+    out = torch.stack(
+        [
+            _step_mdp_impl_tensordict(
+                td,
+                next_tensordict=ntd,
+                keep_other=keep_other,
+                exclude_from_next=exclude_from_next,
+                exclude_from_other=exclude_from_other,
+            )
+            for td, ntd in zip(tensordict.tensordicts, next_tensordicts)
+        ],
+        tensordict.stack_dim,
+    )
+    if next_tensordict is not None:
+        next_tensordict.update(out)
+        return next_tensordict
+    return out
 
 
 def get_available_libraries():

@@ -1250,11 +1250,7 @@ class EnvBase(nn.Module, metaclass=abc.ABCMeta):
             done = done | truncated
             if (break_when_any_done and done.any()) or i == max_steps - 1:
                 break
-            tensordict = step_mdp(
-                tensordict,
-                keep_other=True,
-                exclude_action=False,
-            )
+            tensordict = step_mdp(tensordict, keep_other=True, exclude_keys={"reward"})
             if not break_when_any_done and done.any():
                 _reset = done.clone()
                 tensordict.set("_reset", _reset)
